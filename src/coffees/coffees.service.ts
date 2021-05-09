@@ -1,12 +1,18 @@
-import { HttpStatus, HttpException, NotFoundException } from '@nestjs/common';
+import {
+  HttpStatus,
+  HttpException,
+  NotFoundException,
+  Inject,
+} from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { Coffee } from './entities/coffee.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Connection, QueryRunner, Repository } from 'typeorm';
 import { UpdateCoffeeDto } from './dto/update-coffee.dto';
 import { FlavorEntity } from './entities/flavor.entity';
 import { CreateCoffeeDto } from './dto/create-coffee.dto';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { EventEntity } from 'src/events/entities/event.entity';
 
 @Injectable()
 export class CoffeesService {
@@ -15,7 +21,11 @@ export class CoffeesService {
     private readonly coffeeRepository: Repository<Coffee>,
     @InjectRepository(FlavorEntity)
     private readonly flavorRepository: Repository<FlavorEntity>,
-  ) {}
+    private readonly connection: Connection,
+    @Inject('COFFEE_BRANDS') coffeeBrands: string[],
+  ) {
+    console.log(coffeeBrands);
+  }
 
   findAll(paginationQuery: PaginationQueryDto) {
     const { limit, offset } = paginationQuery;
@@ -78,5 +88,30 @@ export class CoffeesService {
       return existingFlavor;
     }
     return this.flavorRepository.create({ name });
+  }
+
+  async recommendCoffee(coffee: Coffee) {
+    const queryRunner: QueryRunner = this.connection.createQueryRunner();
+
+    await queryRunner.connect(); // init Connection
+    await queryRunner.startTransaction(); // start Connection
+
+    try {
+      coffee.recommendations++;
+
+      const recommendEvent = new EventEntity();
+      recommendEvent.name = 'recommend_coffee';
+      (recommendEvent.type = 'coffee'),
+        (recommendEvent.payload = { coffeeId: coffee.id });
+
+      await queryRunner.manager.save(coffee);
+      await queryRunner.manager.save(recommendEvent);
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+    } finally {
+      await queryRunner.release();
+    }
   }
 }
